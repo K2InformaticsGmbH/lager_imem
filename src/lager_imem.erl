@@ -70,7 +70,7 @@ init(Params) ->
         Password = erlang:md5(State#state.password),
         Cred = {State#state.user, Password},
         io:format("before ~p~n", [State]),
-        ImemSession = erlimem_session:open(local, {State#state.db}, Cred),
+        ImemSession = erlimem:open(local, {State#state.db}, Cred),
         io:format("after ~p~n", [State]),
         [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{?MODULE, []}]],
         {ok, State#state{session=ImemSession}}.
