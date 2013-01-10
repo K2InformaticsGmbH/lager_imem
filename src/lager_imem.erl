@@ -1,5 +1,6 @@
 -module(lager_imem).
 -behaviour(gen_event).
+-include_lib("imem/include/imem_if.hrl").
 
 %% gen_event callbacks
 -export([init/1,
@@ -15,8 +16,9 @@
         level=info,
         tables=[],
         user,
-        password,
         db,
+        password,
+        default_table=?MODULE,
         session}).
 
 
@@ -44,62 +46,74 @@ trace(Filter, Level) ->
 %%%===================================================================
 %%% gen_event callbacks
 %%%===================================================================
+setup_table(ImemSession, Name, []) ->
+    setup_table(ImemSession, Name, record_info(fields, ddLog), ?ddLog, #ddLog{});
 setup_table(ImemSession, Name, Configuration) ->
     LogFieldDefs = [
-            {datetime, list},
-            {level, list},
-            {pid, list},
-            {module, list},
-            {function, list},
+            {logTime, timestamp},
+            {logLevel, atom},
+            {pid, pid},
+            {module, atom},
+            {function, atom},
             {line, integer},
-            {node, list}
+            {node, atom},
+            {fields, list},
+            {message, term},
+            {stacktrace, list}
             ],
 
-    FieldDefs = LogFieldDefs ++ proplists:get_value(fields, Configuration, []) ++ [{message, list}], % KV-pairs of field/type definitions
+    FieldDefs = LogFieldDefs ++ proplists:get_value(fields, Configuration, []), % KV-pairs of field/type definitions
     {Fields, Types} = lists:unzip(FieldDefs),
     Defaults = list_to_tuple([Name|[undefined || _ <- lists:seq(1, length(Fields))]]),
-    DoReplicate = proplists:get_value(replicate, Configuration, false),
+    setup_table(ImemSession, Name, Fields, Types, Defaults).
+
+setup_table(ImemSession, Name, Fields, Types, Defaults) ->
     io:format("~p ~p ~p ~p~n", [Name, Fields, Types, Defaults]),
-    ImemSession:run_cmd(create_table, [Name, {Fields, Types, Defaults}, [{local_content, DoReplicate == false}, {type, bag}], lager_imem]),
+    RecordName = element(1, Defaults),
+    ImemSession:run_cmd(create_table, [Name, {Fields, Types, Defaults}, [{local_content, true}, {record_name, RecordName}, {type, bag}], lager_imem]),
     ImemSession:run_cmd(check_table, [Name]).
 
 init(Params) ->
-    application:start(imem),
-    %try
-        State = state_from_params(#state{}, Params),
-        Password = erlang:md5(State#state.password),
-        Cred = {State#state.user, Password},
-        io:format("before ~p~n", [State]),
-        ImemSession = erlimem_session:open(local, {State#state.db}, Cred),
-        io:format("after ~p~n", [State]),
-        [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{?MODULE, []}]],
-        {ok, State#state{session=ImemSession}}.
-    %catch
-    %    Class:Reason -> io:format(user, "~p failed with ~p:~p~n", [?MODULE,Class, Reason]),
-    %        {stop, "Cant create required lager imem resources"}
-    %end.
+    State = state_from_params(#state{}, Params),
+    erlang:send_after(5000, self(), timeout),
+    {ok, State}.
 
-handle_event({log, LagerMsg}, State = #state{tables=Tables, session=ImemSession, level = LogLevel}) ->
+handle_event({log, LagerMsg}, #state{session=undefined} = State) ->
+    %% we are not ready
+    io:format("lager_imem log ~p~n", [LagerMsg]),
+    {ok, State};
+handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=DefaultTable, session=ImemSession, level = LogLevel}) ->
     case lager_util:is_loggable(LagerMsg, LogLevel, ?MODULE) of
         true ->
             Level = lager_msg:severity_as_int(LagerMsg),
-            {Date, Time} = lager_msg:timestamp(LagerMsg),
+            %{Date, Time} = lager_msg:timestamp(LagerMsg),
+            Date = erlang:now(),
             Message = lager_msg:message(LagerMsg),
             Metadata = lager_msg:metadata(LagerMsg),
             Mod = proplists:get_value(module, Metadata),
             Fun = proplists:get_value(function, Metadata),
             Line = proplists:get_value(line, Metadata),
-            Pid = proplists:get_value(pid, Metadata),
+            %Pid = proplists:get_value(pid, Metadata),
+            Pid = self(),
+            Fields = [P || {K,_} = P <- Metadata, K /= module, K /= function, K /= line, K /= pid],
 
-            Table = proplists:get_value(imem_table, Metadata, ?MODULE),
+            Table = proplists:get_value(imem_table, Fields, DefaultTable),
             Node = node(),
             Configuration = proplists:get_value(Table, Tables, []),
-            FieldData = [proplists:get_value(Field, Metadata) || {Field, _} <- proplists:get_value(fields, Configuration, [])],
+
+            {FieldData, Fields1} =
+            case proplists:get_value(fields, Configuration) of
+                undefined ->
+                    {[], Fields};
+                L ->
+                    {[proplists:get_value(Field, Fields) || {Field, _} <- L], []}
+            end,
             Entry =
-                    lists:append([[Table,
-                     {lists:flatten(Date), lists:flatten(Time)},
-                     lager_util:num_to_level(Level), Pid, Mod, Fun, Line, Node
-                                  ], FieldData, [Message]]),
+                    lists:append([[ddLog,
+                     %{lists:flatten(Date), lists:flatten(Time)},
+                     Date,
+                     lager_util:num_to_level(Level), Pid, Mod, Fun, Line, Node, Fields1
+                                  ], FieldData, [list_to_binary(Message)]]),
 
             EntryTuple = list_to_tuple(Entry),
             ImemSession:run_cmd(write, [Table, EntryTuple]);
@@ -107,7 +121,6 @@ handle_event({log, LagerMsg}, State = #state{tables=Tables, session=ImemSession,
             ok
     end,
     {ok, State};
-
 handle_event({lager_imem_options, Params}, State) ->
     {ok, state_from_params(State, Params)};
 
@@ -120,8 +133,15 @@ handle_call({set_loglevel, Level}, State) ->
 handle_call(get_loglevel, State = #state{level = Level}) ->
     {ok, Level, State}.
 
-handle_info(_Info, State) ->
-    {ok, State}.
+handle_info(timeout, State) ->
+    application:start(imem),
+    Password = erlang:md5(State#state.password),
+    Cred = {State#state.user, Password},
+    io:format("before ~p~n", [State]),
+    ImemSession = erlimem_session:open(local, {State#state.db}, Cred),
+    io:format("after ~p~n", [State]),
+    [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
+    {ok, State#state{session=ImemSession}}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -134,19 +154,22 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 state_from_params(OrigState = #state{user = OldUser,
                                      password = OldPassword,
-                                     level = OldLevel,
                                      db = OldDb,
+                                     level = OldLevel,
+                                     default_table = OldDefaultTableName,
                                      tables = OldTables}, Params) ->
     User = proplists:get_value(user, Params, OldUser),
     Password = proplists:get_value(password, Params, OldPassword),
     Db = proplists:get_value(db, Params, OldDb),
     Tables = proplists:get_value(tables, Params, OldTables),
     Level = proplists:get_value(level, Params, OldLevel),
+    DefaultTableName = proplists:get_value(default_table, Params, OldDefaultTableName),
 
     OrigState#state{level=lager_util:level_to_num(Level),
                     user=User,
                     password=Password,
                     db=Db,
+                    default_table=DefaultTableName,
                     tables=Tables}.
 
 %%%===================================================================
@@ -157,16 +180,17 @@ test() ->
     application:load(lager),
     application:set_env(lager, handlers, [{lager_console_backend, debug},
                                           {lager_imem, [{db, "MproLog"},
-                                                        {level, debug},
+                                                        {level, info},
                                                         {user, <<"admin">>},
                                                         {password, <<"change_on_install">>},
-                                                        {tables,[{customers, [
-                                                                {fields, [
-                                                                        {key, integer},
-                                                                        {client_id, list}
-                                                                    ]}
-                                                                ]}]
-                                                            }
+                                                        {default_table, 'ddLog@'}
+                                                        %{tables,[{customers, [
+                                                        %        {fields, [
+                                                        %                {key, integer},
+                                                        %                {client_id, list}
+                                                        %            ]}
+                                                        %        ]}]
+                                                        %    }
                                                         ]},
                                           {lager_file_backend,
                                            [{"error.log", error, 10485760, "$D0", 5},
