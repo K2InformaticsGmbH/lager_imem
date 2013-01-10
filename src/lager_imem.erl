@@ -65,7 +65,13 @@ setup_table(ImemSession, Name, Configuration) ->
 
     FieldDefs = LogFieldDefs ++ proplists:get_value(fields, Configuration, []), % KV-pairs of field/type definitions
     {Fields, Types} = lists:unzip(FieldDefs),
-    Defaults = list_to_tuple([Name|[undefined || _ <- lists:seq(1, length(Fields))]]),
+    DefFun = fun
+        (integer) -> 0;
+        (list) -> [];
+        (binstr) -> <<"">>;
+        (_) -> undefined
+    end,
+    Defaults = list_to_tuple([Name|[DefFun(T) || T <- Types]]),
     setup_table(ImemSession, Name, Fields, Types, Defaults).
 
 setup_table(ImemSession, Name, Fields, Types, Defaults) ->
@@ -123,12 +129,26 @@ handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=Defaul
                     {[proplists:get_value(Field, Fields) || {Field, _} <- L], []}
             end,
             Entry =
-                     lists:append([[LogRecord,
-                     %{lists:flatten(Date), lists:flatten(Time)},
-                     Date,
-                     lager_util:num_to_level(Level), Pid, Mod, Fun, Line, Node, Fields1
-                                  ], FieldData, [list_to_binary(Message)], [[]]]),
-
+                     lists:append([
+                        [
+                            LogRecord,
+                            Date,
+                            lager_util:num_to_level(Level),
+                            list_to_pid(Pid),
+                            Mod,
+                            Fun,
+                            Line,
+                            Node,
+                            Fields1
+                        ],
+                        FieldData,
+                        [
+                            list_to_binary(Message)
+                        ],
+                        [
+                            [] %  Stacktrace
+                        ]
+                    ]),
 
             EntryTuple = list_to_tuple(Entry),
             ImemSession:run_cmd(write, [LogTable, EntryTuple]);
