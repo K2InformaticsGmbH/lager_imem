@@ -81,17 +81,12 @@ setup_table(ImemSession, Name, Fields, Types, Defaults) ->
 
 init(Params) ->
     application:start(imem),
-    %try
-        State = state_from_params(#state{}, Params),
-        Password = erlang:md5(State#state.password),
-        Cred = {State#state.user, Password},
-        ImemSession = erlimem:open(local, {State#state.db}, Cred),
-        [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{?MODULE, []}]],
-        {ok, State#state{session=ImemSession}}.
-    %catch
-    %    Class:Reason -> io:format(user, "~p failed with ~p:~p~n", [?MODULE,Class, Reason]),
-    %        {stop, "Cant create required lager imem resources"}
-    %end.
+    State = state_from_params(#state{}, Params),
+    Password = erlang:md5(State#state.password),
+    Cred = {State#state.user, Password},
+    ImemSession = erlimem:open(local, {State#state.db}, Cred),
+    [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
+    {ok, State#state{session=ImemSession}}.
 
 handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=DefaultTable, default_record=DefaultRecord, session=ImemSession, level = LogLevel}) ->
     case lager_util:is_loggable(LagerMsg, LogLevel, ?MODULE) of
@@ -168,13 +163,9 @@ handle_call({set_loglevel, Level}, State) ->
 handle_call(get_loglevel, State = #state{level = Level}) ->
     {ok, Level, State}.
 
-handle_info(timeout, State) ->
-    application:start(imem),
-    Password = erlang:md5(State#state.password),
-    Cred = {State#state.user, Password},
-    ImemSession = erlimem_session:open(local, {State#state.db}, Cred),
-    [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
-    {ok, State#state{session=ImemSession}}.
+handle_info(_Info, State) ->
+    %% we'll get (unused) log rotate messages
+    {ok, State}.
 
 terminate(_Reason, _State) ->
     ok.
