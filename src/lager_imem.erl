@@ -77,7 +77,7 @@ setup_table(ImemSession, Name, Configuration) ->
 
 setup_table(ImemSession, Name, Fields, Types, Defaults) ->
     RecordName = element(1, Defaults),
-    ImemSession:run_cmd(create_table, [Name, {Fields, Types, Defaults}, [{local_content, true}, {record_name, RecordName}, {type, bag}], lager_imem]),
+    ImemSession:run_cmd(create_table, [Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem]),
     ImemSession:run_cmd(check_table, [Name]).
 
 init(Params) ->
@@ -147,7 +147,7 @@ handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=Defaul
                     ]),
 
             EntryTuple = list_to_tuple(Entry),
-            ImemSession:run_cmd(write, [LogTable, EntryTuple]);
+            ImemSession:run_cmd(dirty_write, [LogTable, EntryTuple]);
         false ->
             ok
     end,
