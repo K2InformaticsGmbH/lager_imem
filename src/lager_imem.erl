@@ -59,7 +59,7 @@ setup_table(ImemSession, Name, Configuration) ->
             {line, integer},
             {node, atom},
             {fields, list},
-            {message, binstr},
+            {message, binary},
             {stacktrace, list}
             ],
 
