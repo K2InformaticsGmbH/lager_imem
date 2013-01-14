@@ -69,6 +69,7 @@ setup_table(ImemSession, Name, Configuration) ->
         (integer) -> 0;
         (list) -> [];
         (binstr) -> <<"">>;
+        (binary) -> <<>>;
         (_) -> undefined
     end,
     Defaults = list_to_tuple([Name|[DefFun(T) || T <- Types]]),
@@ -136,13 +137,13 @@ handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=Defaul
                             Node,
                             Fields1
                         ],
-                        FieldData,
                         [
                             list_to_binary(Message)
                         ],
                         [
                             [] %  Stacktrace
-                        ]
+                        ],
+                        FieldData
                     ]),
 
             EntryTuple = list_to_tuple(Entry),
