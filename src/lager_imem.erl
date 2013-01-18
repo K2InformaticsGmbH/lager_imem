@@ -79,7 +79,7 @@ init(Params) ->
         State = state_from_params(#state{}, Params),
         Password = erlang:md5(State#state.password),
         Cred = {State#state.user, Password},
-        ImemSession = erlimem:open(local, {State#state.db}, Cred),
+        {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
         [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{?MODULE, []}]],
         {ok, State#state{session=ImemSession}}.
     %catch
@@ -152,7 +152,7 @@ handle_info(timeout, State) ->
     application:start(imem),
     Password = erlang:md5(State#state.password),
     Cred = {State#state.user, Password},
-    ImemSession = erlimem_session:open(local, {State#state.db}, Cred),
+    {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
     [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
     {ok, State#state{session=ImemSession}}.
 
