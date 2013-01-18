@@ -59,33 +59,35 @@ setup_table(ImemSession, Name, Configuration) ->
             {line, integer},
             {node, atom},
             {fields, list},
-            {message, binstr},
+            {message, binary},
             {stacktrace, list}
             ],
 
     FieldDefs = LogFieldDefs ++ proplists:get_value(fields, Configuration, []), % KV-pairs of field/type definitions
     {Fields, Types} = lists:unzip(FieldDefs),
-    Defaults = list_to_tuple([Name|[undefined || _ <- lists:seq(1, length(Fields))]]),
+    DefFun = fun
+        (integer) -> 0;
+        (list) -> [];
+        (binstr) -> <<"">>;
+        (binary) -> <<>>;
+        (_) -> undefined
+    end,
+    Defaults = list_to_tuple([Name|[DefFun(T) || T <- Types]]),
     setup_table(ImemSession, Name, Fields, Types, Defaults).
 
 setup_table(ImemSession, Name, Fields, Types, Defaults) ->
     RecordName = element(1, Defaults),
-    ImemSession:run_cmd(create_table, [Name, {Fields, Types, Defaults}, [{local_content, true}, {record_name, RecordName}, {type, bag}], lager_imem]),
+    ImemSession:run_cmd(create_table, [Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem]),
     ImemSession:run_cmd(check_table, [Name]).
 
 init(Params) ->
     application:start(imem),
-    %try
-        State = state_from_params(#state{}, Params),
-        Password = erlang:md5(State#state.password),
-        Cred = {State#state.user, Password},
-        {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
-        [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{?MODULE, []}]],
-        {ok, State#state{session=ImemSession}}.
-    %catch
-    %    Class:Reason -> io:format(user, "~p failed with ~p:~p~n", [?MODULE,Class, Reason]),
-    %        {stop, "Cant create required lager imem resources"}
-    %end.
+    State = state_from_params(#state{}, Params),
+    Password = erlang:md5(State#state.password),
+    Cred = {State#state.user, Password},
+    {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
+    [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
+    {ok, State#state{session=ImemSession}}.
 
 handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=DefaultTable, default_record=DefaultRecord, session=ImemSession, level = LogLevel}) ->
     case lager_util:is_loggable(LagerMsg, LogLevel, ?MODULE) of
@@ -123,15 +125,29 @@ handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=Defaul
                     {[proplists:get_value(Field, Fields) || {Field, _} <- L], []}
             end,
             Entry =
-                     lists:append([[LogRecord,
-                     %{lists:flatten(Date), lists:flatten(Time)},
-                     Date,
-                     lager_util:num_to_level(Level), Pid, Mod, Fun, Line, Node, Fields1
-                                  ], FieldData, [list_to_binary(Message)], [[]]]),
-
+                     lists:append([
+                        [
+                            LogRecord,
+                            Date,
+                            lager_util:num_to_level(Level),
+                            list_to_pid(Pid),
+                            Mod,
+                            Fun,
+                            Line,
+                            Node,
+                            Fields1
+                        ],
+                        [
+                            list_to_binary(Message)
+                        ],
+                        [
+                            [] %  Stacktrace
+                        ],
+                        FieldData
+                    ]),
 
             EntryTuple = list_to_tuple(Entry),
-            ImemSession:run_cmd(write, [LogTable, EntryTuple]);
+            ImemSession:run_cmd(dirty_write, [LogTable, EntryTuple]);
         false ->
             ok
     end,
@@ -148,13 +164,9 @@ handle_call({set_loglevel, Level}, State) ->
 handle_call(get_loglevel, State = #state{level = Level}) ->
     {ok, Level, State}.
 
-handle_info(timeout, State) ->
-    application:start(imem),
-    Password = erlang:md5(State#state.password),
-    Cred = {State#state.user, Password},
-    {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
-    [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
-    {ok, State#state{session=ImemSession}}.
+handle_info(_Info, State) ->
+    %% we'll get (unused) log rotate messages
+    {ok, State}.
 
 terminate(_Reason, _State) ->
     ok.
