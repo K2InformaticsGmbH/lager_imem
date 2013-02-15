@@ -124,13 +124,20 @@ handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=Defaul
                 L ->
                     {[proplists:get_value(Field, Fields) || {Field, _} <- L], []}
             end,
+            NPid = case is_list(Pid) of
+                true ->
+                    list_to_pid(Pid);
+                false ->
+                    Pid
+            end,
+
             Entry =
                      lists:append([
                         [
                             LogRecord,
                             Date,
                             lager_util:num_to_level(Level),
-                            list_to_pid(Pid),
+                            NPid,
                             Mod,
                             Fun,
                             Line,
