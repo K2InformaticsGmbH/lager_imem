@@ -77,8 +77,7 @@ setup_table(ImemSession, Name, Configuration) ->
 
 setup_table(ImemSession, Name, Fields, Types, Defaults) ->
     RecordName = element(1, Defaults),
-    ImemSession:run_cmd(create_table, [Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem]),
-    ImemSession:run_cmd(check_table, [Name]).
+    ImemSession:run_cmd(create_check_table, [Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem]).
 
 init(Params) ->
     application:start(imem),
