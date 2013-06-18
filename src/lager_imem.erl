@@ -18,6 +18,7 @@
         user,
         db,
         password,
+        mref,
         default_table=?MODULE,
         default_record=?MODULE,
         session}).
@@ -86,8 +87,10 @@ init(Params) ->
     Password = erlang:md5(State#state.password),
     Cred = {State#state.user, Password},
     {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
+    {_, SessionPid} = ImemSession,
+    MRef = monitor(process, SessionPid),
     [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
-    {ok, State#state{session=ImemSession}}.
+    {ok, State#state{mref=MRef, session=ImemSession}}.
 
 handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=DefaultTable, default_record=DefaultRecord, session=ImemSession, level = LogLevel}) ->
     case lager_util:is_loggable(LagerMsg, LogLevel, ?MODULE) of
@@ -170,6 +173,14 @@ handle_call({set_loglevel, Level}, State) ->
 
 handle_call(get_loglevel, State = #state{level = Level}) ->
     {ok, Level, State}.
+
+handle_info({'DOWN', OldMRef, process, _Pid, _Info}, #state{mref=OldMRef} = State) ->
+    Password = erlang:md5(State#state.password),
+    Cred = {State#state.user, Password},
+    {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
+    {_, SessionPid} = ImemSession,
+    MRef = monitor(process, SessionPid),
+    {ok, State#state{mref=MRef, session=ImemSession}};
 
 handle_info(_Info, State) ->
     %% we'll get (unused) log rotate messages
