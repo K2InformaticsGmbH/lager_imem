@@ -81,6 +81,7 @@ setup_table(ImemSession, Name, Fields, Types, Defaults) ->
     ImemSession:run_cmd(create_check_table, [Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem]).
 
 init(Params) ->
+    application:start(sqlparse),
     application:start(imem),
     State = state_from_params(#state{}, Params),
     Password = erlang:md5(State#state.password),
