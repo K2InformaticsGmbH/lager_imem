@@ -15,13 +15,8 @@
 -record(state, {
         level=info,
         tables=[],
-        user,
-        db,
-        password,
-        mref,
         default_table=?MODULE,
-        default_record=?MODULE,
-        session}).
+        default_record=?MODULE}).
 
 
 %%%===================================================================
@@ -48,9 +43,9 @@ trace(Filter, Level) ->
 %%%===================================================================
 %%% gen_event callbacks
 %%%===================================================================
-setup_table(ImemSession, Name, []) ->
-    setup_table(ImemSession, Name, record_info(fields, ddLog), ?ddLog, #ddLog{});
-setup_table(ImemSession, Name, Configuration) ->
+setup_table(Name, []) ->
+    setup_table(Name, record_info(fields, ddLog), ?ddLog, #ddLog{});
+setup_table(Name, Configuration) ->
     LogFieldDefs = [
             {logTime, timestamp},
             {logLevel, atom},
@@ -74,24 +69,19 @@ setup_table(ImemSession, Name, Configuration) ->
         (_) -> undefined
     end,
     Defaults = list_to_tuple([Name|[DefFun(T) || T <- Types]]),
-    setup_table(ImemSession, Name, Fields, Types, Defaults).
+    setup_table(Name, Fields, Types, Defaults).
 
-setup_table(ImemSession, Name, Fields, Types, Defaults) ->
+setup_table(Name, Fields, Types, Defaults) ->
     RecordName = element(1, Defaults),
-    ImemSession:run_cmd(create_check_table, [Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem]).
+    lager_dal:create_check_table(Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem).
 
 init(Params) ->
-    application:start(imem),
     State = state_from_params(#state{}, Params),
-    Password = erlang:md5(State#state.password),
-    Cred = {State#state.user, Password},
-    {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
-    {_, SessionPid} = ImemSession,
-    MRef = monitor(process, SessionPid),
-    [setup_table(ImemSession, Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]],
-    {ok, State#state{mref=MRef, session=ImemSession}}.
+    [setup_table(Name, Configuration) || {Name, Configuration} <- State#state.tables ++ [{State#state.default_table, []}]
+    ],
+    {ok, State}.
 
-handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=DefaultTable, default_record=DefaultRecord, session=ImemSession, level = LogLevel}) ->
+handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=DefaultTable, default_record=DefaultRecord, level = LogLevel}) ->
     case lager_util:is_loggable(LagerMsg, LogLevel, ?MODULE) of
         true ->
             Level = lager_msg:severity_as_int(LagerMsg),
@@ -156,7 +146,7 @@ handle_event({log, LagerMsg}, State = #state{tables=Tables, default_table=Defaul
                     ]),
 
             EntryTuple = list_to_tuple(Entry),
-            ImemSession:run_cmd(dirty_write, [LogTable, EntryTuple]);
+            lager_dal:dirty_write(LogTable, EntryTuple);
         false ->
             ok
     end,
@@ -173,14 +163,6 @@ handle_call({set_loglevel, Level}, State) ->
 handle_call(get_loglevel, State = #state{level = Level}) ->
     {ok, Level, State}.
 
-handle_info({'DOWN', OldMRef, process, _Pid, _Info}, #state{mref=OldMRef} = State) ->
-    Password = erlang:md5(State#state.password),
-    Cred = {State#state.user, Password},
-    {ok, ImemSession} = erlimem:open(local, {State#state.db}, Cred),
-    {_, SessionPid} = ImemSession,
-    MRef = monitor(process, SessionPid),
-    {ok, State#state{mref=MRef, session=ImemSession}};
-
 handle_info(_Info, State) ->
     %% we'll get (unused) log rotate messages
     {ok, State}.
@@ -194,25 +176,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-state_from_params(OrigState = #state{user = OldUser,
-                                     password = OldPassword,
-                                     db = OldDb,
-                                     level = OldLevel,
+state_from_params(OrigState = #state{level = OldLevel,
                                      default_table = OldDefaultTableName,
                                      default_record = OldDefaultRecord,
                                      tables = OldTables}, Params) ->
-    User = proplists:get_value(user, Params, OldUser),
-    Password = proplists:get_value(password, Params, OldPassword),
-    Db = proplists:get_value(db, Params, OldDb),
     Tables = proplists:get_value(tables, Params, OldTables),
     Level = proplists:get_value(level, Params, OldLevel),
     DefaultTableName = proplists:get_value(default_table, Params, OldDefaultTableName),
     DefaultRecord = proplists:get_value(default_record, Params, OldDefaultRecord),
 
     OrigState#state{level=lager_util:level_to_num(Level),
-                    user=User,
-                    password=Password,
-                    db=Db,
                     default_table=DefaultTableName,
                     default_record=DefaultRecord,
                     tables=Tables}.
