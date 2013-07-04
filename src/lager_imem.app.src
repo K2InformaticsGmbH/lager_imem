@@ -1,7 +1,7 @@
 {application, lager_imem,
  [
   {description, "A imem target adapter for lager"},
-  {vsn, "1.0.0"},
+  {vsn, "1.1.0"},
   {registered, []},
   {applications, [
                   kernel,
