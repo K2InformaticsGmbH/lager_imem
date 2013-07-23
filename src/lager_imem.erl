@@ -197,10 +197,7 @@ state_from_params(OrigState = #state{level = OldLevel,
 test() ->
     application:load(lager),
     application:set_env(lager, handlers, [{lager_console_backend, debug},
-                                          {lager_imem, [{db, "MproLog"},
-                                                        {level, info},
-                                                        {user, <<"admin">>},
-                                                        {password, <<"change_on_install">>},
+                                          {lager_imem, [{level, info},
                                                         {default_table, 'ddLog@'},
                                                         {default_record, ddLog},
                                                         {tables,[{customers, [
