@@ -1,6 +1,6 @@
 -module(lager_imem).
 -behaviour(gen_event).
--include_lib("imem/include/imem_if.hrl").
+-include_lib("imem/include/imem_meta.hrl").
 
 %% gen_event callbacks
 -export([init/1,
