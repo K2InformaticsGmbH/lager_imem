@@ -73,7 +73,11 @@ setup_table(Name, Configuration) ->
 
 setup_table(Name, Fields, Types, Defaults) ->
     RecordName = element(1, Defaults),
-    lager_dal:create_check_table(Name, {Fields, Types, Defaults}, [{record_name, RecordName}, {type, ordered_set}], lager_imem).
+    lager_dal:create_check_table(
+      Name, {Fields, Types, Defaults},
+      [{record_name, RecordName}, {type, ordered_set},
+       {purge_delay,430000}],
+      lager_imem).
 
 init(Params) ->
     State = state_from_params(#state{}, Params),
